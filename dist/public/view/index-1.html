@@ -1,0 +1,364 @@
+<script>/**
+* Service Parameters Input Builder
+* Handles dynamic parameter field creation with special handling for date and mdCode types
+*/
+    const ServiceParamInputs = {
+        // Configuration for date picker
+        datePickerConfig: {
+            autoApply: true,
+            singleDatePicker: true,
+            alwaysShowCalendars: true,
+            parentEl: "sp-params-fields",
+            opens: "left",
+            ranges: {
+                Today: [moment(), moment()],
+                Yesterday: [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
+                'Last 7 Days': [moment().subtract(6, 'days'), moment()],
+                'Last 30 Days': [moment().subtract(29, 'days'), moment()],
+                'This Month': [moment().startOf('month'), moment().endOf('month')],
+                'Last Month': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')]
+            }
+        },
+
+        // DOM selectors
+        selectors: {
+            paramsContainer: '#sp-params-fields'
+        },
+
+        // CSS classes for consistent styling
+        classes: {
+            paramContainer: 'flex gap-3 items-start sp-params',
+            paramKeyColumn: 'w-1/2',
+            paramValueColumn: 'w-full',
+            inputBase: 'block w-full rounded-md border-0 py-1.5 text-sm shadow-sm ring-1 ring-inset placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-primary font-mono',
+            inputLight: 'text-gray-900 bg-white ring-gray-300',
+            inputDark: 'dark:text-white dark:bg-gray-800 dark:ring-gray-600',
+            label: 'block text-xs uppercase font-bold text-gray-400 mb-1'
+        },
+
+        /**
+         * Renders parameter input field based on parameter type
+         */
+        renderParamField(param) {
+            const $container = $(this.selectors.paramsContainer);
+
+            // Create parameter row
+            $container.append(this.createParamRowHtml(param));
+
+            // Handle special parameter types
+            if (param.Param === 'mdCode') {
+                this.renderMdCodeSelector(param);
+            } else if (param.type === 'date') {
+                this.renderDatePicker(param);
+            } else {
+                this.setParamValue(param);
+            }
+        },
+
+        /**
+         * Creates HTML for parameter row
+         */
+        createParamRowHtml(param) {
+            const valueField = this.getValueFieldHtml(param);
+
+            return `
+      <div class="${this.classes.paramContainer}">
+        <div class="${this.classes.paramKeyColumn}">
+          <label class="${this.classes.label}">Key</label>
+          <input 
+            class="${this.getInputClasses()}"
+            readonly 
+            type="text" 
+            value="${this.escapeHtml(param.Param)}" 
+          />
+        </div>
+        <div class="${this.classes.paramValueColumn}">
+          <label class="${this.classes.label}">Value</label>
+          ${valueField}
+        </div>
+      </div>
+    `;
+        },
+
+        /**
+         * Generates appropriate value field HTML based on parameter type
+         */
+        getValueFieldHtml(param) {
+            if (param.Param === 'mdCode') {
+                return this.getMdCodeSelectorHtml();
+            }
+
+            const inputType = param.type === 'number' ? 'number' : 'text';
+            const isReadonly = param.type === 'date' ? 'readonly' : '';
+
+            return `
+                    <input 
+                        id="${this.escapeHtml(param.Param)}" 
+                        param-type="${this.escapeHtml(param.type)}"
+                        class="${this.getInputClasses()}"
+                        placeholder="Value" 
+                        type="${inputType}" 
+                        ${isReadonly}
+                    />
+                    `;
+        },
+
+        /**
+         * Returns complete input CSS classes
+         */
+        getInputClasses() {
+            return `${this.classes.inputBase} ${this.classes.inputLight} ${this.classes.inputDark}`;
+        },
+
+        /**
+         * Renders and configures date picker for date parameters
+         */
+        renderDatePicker(param) {
+            const $container = $(this.selectors.paramsContainer);
+            const paramName = param.Param;
+            const $input = $(`#${paramName}`);
+
+            // Add auto date logic container
+            $container.append(this.createAutoDateLogicHtml(param));
+
+            // Initialize date picker
+            $input.daterangepicker({
+                ...this.datePickerConfig,
+                callback: (start) => this.toggleAutoDate(param, start)
+            });
+
+            // Set initial date value
+            this.initializeDateValue(param, $input);
+
+            // Add dark mode support
+            this.setupDatePickerDarkMode($input);
+        },
+
+        /**
+         * Creates HTML for auto date logic container
+         */
+        createAutoDateLogicHtml(param, customMessage = '') {
+            const message = customMessage || `
+      Would you like to use the <strong>current date</strong> (today) as the 
+      parameter value for <strong>${this.escapeHtml(param.Param)}</strong> 
+      each time this service runs?
+    `;
+
+            return `
+      <div id="${param.Param}-container" 
+           class="hidden flex items-start gap-3 p-3 rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
+        <div class="flex-shrink-0 pt-0.5">
+          <span class="material-symbols-outlined text-blue-500 text-xl">info</span>
+        </div>
+        <div class="flex flex-col gap-1">
+          <p class="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+            <strong>Schedule Logic:</strong> ${message}
+          </p>
+          <label class="inline-flex items-center mt-1 cursor-pointer">
+            <input 
+              id="${param.Param}-auto" 
+              type="checkbox" 
+              class="rounded border-gray-300 text-primary focus:ring-primary w-3.5 h-3.5"
+              checked=""
+            >
+            <span class="ml-2 text-xs font-medium text-blue-800 dark:text-blue-200">
+              Yes, always use current date
+            </span>
+          </label>
+        </div>
+      </div>
+    `;
+        },
+
+        /**
+         * Initializes date value for date picker
+         */
+        initializeDateValue(param, $input) {
+            const datePicker = $input.data('daterangepicker');
+            const initialValue = !param.value || param.value === true
+                ? moment().format('MM/DD/YYYY')
+                : param.value;
+
+            const initialDate = moment(initialValue, 'MM/DD/YYYY');
+
+            datePicker.setStartDate(initialDate);
+            datePicker.setEndDate(initialDate);
+            $input.val(initialDate.format('MM/DD/YYYY'));
+
+            this.toggleAutoDate(param, initialDate);
+        },
+
+        /**
+         * Toggles auto date logic container visibility
+         */
+        toggleAutoDate(param, date) {
+            const paramName = param.Param;
+            const isToday = date.isSame(moment(), 'day');
+            const $container = $(`#${paramName}-container`);
+            const $checkbox = $(`#${paramName}-auto`);
+
+            if (isToday) {
+                $container.removeClass('hidden').fadeIn(200);
+            } else {
+                $container.addClass('hidden');
+                $checkbox.prop('checked', false);
+            }
+        },
+
+        /**
+         * Sets up dark mode support for date picker
+         */
+        setupDatePickerDarkMode($input) {
+            $input.on('show.daterangepicker', (ev, picker) => {
+                picker.container.addClass('dark:bg-gray-700 text-white rounded-md shadow-lg');
+            });
+        },
+
+        /**
+         * Sets initial value for non-date parameters
+         */
+        setParamValue(param) {
+            if (param.value !== true && param.value !== false && param.value !== undefined) {
+                $(`#${param.Param}`).val(param.value);
+            }
+        },
+
+        /**
+         * Renders MD Code selector component
+         */
+        renderMdCodeSelector(param) {
+            const $container = $(this.selectors.paramsContainer);
+            const selectorHtml = this.getMdCodeSelectorHtml();
+
+            // Append the selector HTML
+            $(`#${param.Param}`).replaceWith(selectorHtml);
+
+            // Initialize the multi-select functionality
+            this.initializeMdCodeSelector(param.Param);
+        },
+
+        /**
+         * Generates HTML for MD Code multi-select component
+         */
+        getMdCodeSelectorHtml() {
+            const optionsHtml = this.generateMdCodeOptions();
+
+            return `
+      <div class="relative w-full max-w-md" id="mdCodeMultiSelectContainer">
+        <div class="flex items-center w-full rounded-md border-0 py-1.5 px-3 text-sm shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-gray-600 bg-white dark:bg-gray-800 focus-within:ring-2 focus-within:ring-primary transition-all">
+          <input 
+            type="text" 
+            id="mdCodeSearchInput"
+            class="block text-sm w-full border-0 p-0 text-gray-900 dark:text-white bg-transparent focus:ring-0 font-mono"
+            placeholder="Input or search salesman" 
+            autocomplete="off"
+          >
+          <span 
+            id="mdCodeSelectedCount"
+            class="hidden ml-2 text-xs bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 px-2 py-0.5 rounded-full font-bold"
+          >
+            0
+          </span>
+        </div>
+        <div 
+          id="mdCodeDropdownMenu"
+          class="hidden absolute z-10 mt-2 w-full rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+        >
+          <div class="py-1 max-h-60 overflow-y-auto" id="mdCodeOptionsList">
+            ${optionsHtml}
+            <div id="mdCodeNoResults" class="hidden px-4 py-2 text-sm text-gray-500 italic">
+              No matches found...
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+        },
+
+        /**
+         * Generates HTML options for MD Code selector
+         */
+        generateMdCodeOptions() {
+            if (!window.mdUsers || !window.mdUsers.length) {
+                return '<div class="px-4 py-2 text-sm text-gray-500 italic">No users available</div>';
+            }
+
+            return window.mdUsers.map(user => `
+      <label class="flex items-center px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors">
+        <input 
+          type="checkbox" 
+          value="${this.escapeHtml(user.mdCode)}"
+          class="mdCode-option-checkbox rounded border-gray-300 text-primary focus:ring-primary mr-3"
+        >
+        <span class="text-gray-900 dark:text-gray-200">${this.escapeHtml(user.MDNAME)}</span>
+      </label>
+    `).join('');
+        },
+
+        /**
+         * Initializes MD Code selector event handlers
+         */
+        initializeMdCodeSelector(type) {
+            const $container = $(`#${type}MultiSelectContainer`);
+            const $searchInput = $(`#${type}SearchInput`);
+            const $dropdown = $(`#${type}DropdownMenu`);
+            const $countBadge = $(`#${type}SelectedCount`);
+
+            // Toggle dropdown on focus
+            $searchInput.on('focus', () => $dropdown.removeClass('hidden'));
+
+            // Close dropdown on outside click
+            $(document).on('click', (e) => {
+                if (!$container.is(e.target) && $container.has(e.target).length === 0) {
+                    $dropdown.addClass('hidden');
+                }
+            });
+
+            // Filter options on search
+            $searchInput.on('input', (e) => {
+                const term = e.target.value.toLowerCase();
+                let hasVisible = false;
+
+                $(`#${type}OptionsList label`).each(function () {
+                    const text = $(this).text().toLowerCase();
+                    const isVisible = text.includes(term);
+                    $(this).toggle(isVisible);
+                    if (isVisible) hasVisible = true;
+                });
+
+                $(`#${type}NoResults`).toggleClass('hidden', hasVisible);
+            });
+
+            // Update selected count
+            $(document).on('change', `.${type}-option-checkbox`, () => {
+                const selectedValues = this.getSelectedMdCodes();
+
+                if (selectedValues.length > 0) {
+                    $countBadge.removeClass('hidden').text(selectedValues.length);
+                } else {
+                    $countBadge.addClass('hidden');
+                }
+            });
+        },
+
+        /**
+         * Gets selected MD Code values
+         */
+        getSelectedMdCodes() {
+            return $('.mdCode-option-checkbox:checked')
+                .map((_, checkbox) => $(checkbox).val())
+                .get();
+        },
+
+        /**
+         * Simple HTML escaping for safety
+         */
+        escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    };
+
+    // Usage: ServiceParamInputs.renderParamField(param);
+</script>
